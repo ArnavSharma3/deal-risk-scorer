@@ -12,6 +12,7 @@ export async function GET(request: NextRequest) {
   const state = searchParams.get("state");
   const oauthError = searchParams.get("error");
   const storedState = request.cookies.get("oauth_state")?.value;
+  const codeVerifier = request.cookies.get("oauth_code_verifier")?.value;
 
   if (oauthError) {
     console.error("Salesforce OAuth error:", oauthError, searchParams.get("error_description"));
@@ -20,14 +21,20 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  if (!code || !state || !storedState || state !== storedState) {
+  if (
+    !code ||
+    !state ||
+    !storedState ||
+    state !== storedState ||
+    !codeVerifier
+  ) {
     return NextResponse.redirect(
       new URL("/login?error=invalid_oauth", request.url)
     );
   }
 
   try {
-    const tokens = await exchangeCodeForTokens(code);
+    const tokens = await exchangeCodeForTokens(code, codeVerifier);
     const userInfo = await getUserInfo(
       tokens.access_token,
       tokens.instance_url,
@@ -63,6 +70,7 @@ export async function GET(request: NextRequest) {
 
     const response = NextResponse.redirect(new URL("/", request.url));
     response.cookies.delete("oauth_state");
+    response.cookies.delete("oauth_code_verifier");
     return response;
   } catch (error) {
     console.error("OAuth callback error:", error);

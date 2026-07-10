@@ -44,7 +44,10 @@ export function hasSalesforceCredentials(): boolean {
   return !placeholders.has(clientId) && !placeholders.has(clientSecret);
 }
 
-export function getSalesforceAuthUrl(state: string): string {
+export function getSalesforceAuthUrl(
+  state: string,
+  codeChallenge: string
+): string {
   const { clientId, redirectUri, loginUrl } = getOAuthConfig();
 
   const params = new URLSearchParams({
@@ -53,13 +56,16 @@ export function getSalesforceAuthUrl(state: string): string {
     redirect_uri: redirectUri,
     scope: "api refresh_token",
     state,
+    code_challenge: codeChallenge,
+    code_challenge_method: "S256",
   });
 
   return `${loginUrl}/services/oauth2/authorize?${params.toString()}`;
 }
 
 export async function exchangeCodeForTokens(
-  code: string
+  code: string,
+  codeVerifier: string
 ): Promise<SalesforceTokens> {
   const { clientId, clientSecret, redirectUri, loginUrl } = getOAuthConfig();
 
@@ -72,6 +78,7 @@ export async function exchangeCodeForTokens(
       client_id: clientId,
       client_secret: clientSecret,
       redirect_uri: redirectUri,
+      code_verifier: codeVerifier,
     }),
   });
 
