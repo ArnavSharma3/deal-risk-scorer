@@ -10,9 +10,17 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
   const state = searchParams.get("state");
+  const oauthError = searchParams.get("error");
   const storedState = request.cookies.get("oauth_state")?.value;
 
-  if (!code || !state || state !== storedState) {
+  if (oauthError) {
+    console.error("Salesforce OAuth error:", oauthError, searchParams.get("error_description"));
+    return NextResponse.redirect(
+      new URL("/login?error=oauth_failed", request.url)
+    );
+  }
+
+  if (!code || !state || !storedState || state !== storedState) {
     return NextResponse.redirect(
       new URL("/login?error=invalid_oauth", request.url)
     );
@@ -20,7 +28,15 @@ export async function GET(request: NextRequest) {
 
   try {
     const tokens = await exchangeCodeForTokens(code);
-    const userInfo = await getUserInfo(tokens.access_token, tokens.instance_url);
+    const userInfo = await getUserInfo(
+      tokens.access_token,
+      tokens.instance_url,
+      tokens.id
+    );
+
+    if (!userInfo.email) {
+      throw new Error("Salesforce did not return a user email");
+    }
 
     const user = await prisma.user.upsert({
       where: { email: userInfo.email },

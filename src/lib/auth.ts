@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { randomBytes } from "crypto";
+import { hasSalesforceCredentials } from "@/lib/salesforce";
 
 const SESSION_COOKIE = "drs_session";
 const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -54,6 +55,14 @@ export async function destroySession() {
   }
 }
 
+/**
+ * Demo mode is only forced when DEMO_MODE=true AND Salesforce credentials
+ * are missing/placeholder. When real Connected App credentials are present,
+ * Salesforce OAuth takes precedence over the global demo flag.
+ */
 export function isDemoMode(): boolean {
+  if (hasSalesforceCredentials()) {
+    return false;
+  }
   return process.env.DEMO_MODE === "true" || !process.env.SALESFORCE_CLIENT_ID;
 }

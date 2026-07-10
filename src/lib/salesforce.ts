@@ -5,11 +5,47 @@ import type {
   SalesforceOpportunity,
 } from "@/lib/types";
 
-export function getSalesforceAuthUrl(state: string): string {
-  const clientId = process.env.SALESFORCE_CLIENT_ID!;
-  const redirectUri = process.env.SALESFORCE_CALLBACK_URL!;
+export type SalesforceTokens = {
+  access_token: string;
+  refresh_token: string;
+  instance_url: string;
+  id: string;
+};
+
+function getOAuthConfig() {
+  const clientId = process.env.SALESFORCE_CLIENT_ID?.trim();
+  const clientSecret = process.env.SALESFORCE_CLIENT_SECRET?.trim();
+  const redirectUri = process.env.SALESFORCE_CALLBACK_URL?.trim();
   const loginUrl =
-    process.env.SALESFORCE_LOGIN_URL || "https://login.salesforce.com";
+    process.env.SALESFORCE_LOGIN_URL?.trim() || "https://login.salesforce.com";
+
+  if (!clientId || !clientSecret || !redirectUri) {
+    throw new Error(
+      "Salesforce OAuth is not configured. Set SALESFORCE_CLIENT_ID, SALESFORCE_CLIENT_SECRET, and SALESFORCE_CALLBACK_URL."
+    );
+  }
+
+  return { clientId, clientSecret, redirectUri, loginUrl };
+}
+
+export function hasSalesforceCredentials(): boolean {
+  const clientId = process.env.SALESFORCE_CLIENT_ID?.trim();
+  const clientSecret = process.env.SALESFORCE_CLIENT_SECRET?.trim();
+  const redirectUri = process.env.SALESFORCE_CALLBACK_URL?.trim();
+
+  if (!clientId || !clientSecret || !redirectUri) return false;
+
+  const placeholders = new Set([
+    "your_consumer_key_here",
+    "your_consumer_secret_here",
+    "",
+  ]);
+
+  return !placeholders.has(clientId) && !placeholders.has(clientSecret);
+}
+
+export function getSalesforceAuthUrl(state: string): string {
+  const { clientId, redirectUri, loginUrl } = getOAuthConfig();
 
   const params = new URLSearchParams({
     response_type: "code",
@@ -22,12 +58,10 @@ export function getSalesforceAuthUrl(state: string): string {
   return `${loginUrl}/services/oauth2/authorize?${params.toString()}`;
 }
 
-export async function exchangeCodeForTokens(code: string) {
-  const clientId = process.env.SALESFORCE_CLIENT_ID!;
-  const clientSecret = process.env.SALESFORCE_CLIENT_SECRET!;
-  const redirectUri = process.env.SALESFORCE_CALLBACK_URL!;
-  const loginUrl =
-    process.env.SALESFORCE_LOGIN_URL || "https://login.salesforce.com";
+export async function exchangeCodeForTokens(
+  code: string
+): Promise<SalesforceTokens> {
+  const { clientId, clientSecret, redirectUri, loginUrl } = getOAuthConfig();
 
   const response = await fetch(`${loginUrl}/services/oauth2/token`, {
     method: "POST",
@@ -46,12 +80,33 @@ export async function exchangeCodeForTokens(code: string) {
     throw new Error(`Salesforce token exchange failed: ${error}`);
   }
 
-  return response.json() as Promise<{
-    access_token: string;
-    refresh_token: string;
-    instance_url: string;
-    id: string;
-  }>;
+  return response.json() as Promise<SalesforceTokens>;
+}
+
+export async function refreshAccessToken(
+  refreshToken: string
+): Promise<Pick<SalesforceTokens, "access_token" | "instance_url" | "id"> & {
+  refresh_token?: string;
+}> {
+  const { clientId, clientSecret, loginUrl } = getOAuthConfig();
+
+  const response = await fetch(`${loginUrl}/services/oauth2/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+      client_id: clientId,
+      client_secret: clientSecret,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Salesforce token refresh failed: ${error}`);
+  }
+
+  return response.json();
 }
 
 export function createConnection(
@@ -66,8 +121,33 @@ export function createConnection(
 
 export async function getUserInfo(
   accessToken: string,
-  instanceUrl: string
+  instanceUrl: string,
+  identityUrl?: string
 ): Promise<{ email: string; name: string; userId: string }> {
+  // Prefer the identity endpoint returned by the token response when available.
+  if (identityUrl) {
+    const response = await fetch(identityUrl, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    if (response.ok) {
+      const identity = (await response.json()) as {
+        user_id: string;
+        email?: string;
+        display_name?: string;
+        username?: string;
+      };
+
+      if (identity.email || identity.display_name || identity.username) {
+        return {
+          email: identity.email || identity.username || "",
+          name: identity.display_name || identity.username || "Salesforce User",
+          userId: identity.user_id,
+        };
+      }
+    }
+  }
+
   const conn = createConnection(accessToken, instanceUrl);
   const identity = await conn.identity();
   const user = await conn
@@ -156,7 +236,12 @@ export function classifySalesforceError(error: unknown): SalesforceApiError {
       "TIMEOUT"
     );
   }
-  if (message.includes("INVALID_SESSION") || message.includes("expired")) {
+  if (
+    message.includes("INVALID_SESSION") ||
+    message.includes("expired") ||
+    message.includes("token refresh failed") ||
+    message.includes("authentication failure")
+  ) {
     return new SalesforceApiError(
       "Salesforce session expired. Please reconnect your account.",
       "AUTH"
