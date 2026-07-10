@@ -53,30 +53,35 @@ export interface DashboardFilters {
 export interface SalesforceOpportunity {
   Id: string;
   Name: string;
-  Amount: number;
+  Amount?: number;
   StageName: string;
   CloseDate: string;
   OwnerId: string;
-  Owner: { Name: string };
-  LastActivityDate?: string;
-  /** Proxy for stage change timing when LastStageChangeDate is unavailable. */
+  AccountId?: string;
+  Probability?: number;
   LastModifiedDate?: string;
+  CreatedDate?: string;
+  Description?: string;
+  /** Enriched from a separate User query (Id, Name, Email). */
+  Owner?: { Name: string };
 }
 
 export interface SalesforceActivity {
   Id: string;
   Subject?: string;
   ActivityDate?: string;
-  /** Present on Task; not a standard Event field. */
-  Type?: string;
   WhatId?: string;
+  Status?: string;
   OwnerId?: string;
   CreatedDate?: string;
+  Description?: string;
+  StartDateTime?: string;
+  EndDateTime?: string;
 }
 
-export interface SalesforceContact {
+export interface SalesforceAccount {
   Id: string;
   Name: string;
-  Email?: string;
-  LastActivityDate?: string;
+  Industry?: string;
+  Type?: string;
 }

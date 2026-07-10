@@ -1,7 +1,7 @@
 import { Connection } from "jsforce";
 import type {
+  SalesforceAccount,
   SalesforceActivity,
-  SalesforceContact,
   SalesforceOpportunity,
 } from "@/lib/types";
 
@@ -157,11 +157,12 @@ export async function getUserInfo(
 
   const conn = createConnection(accessToken, instanceUrl);
   const identity = await conn.identity();
+  // User: Id, Name, Email only
   const user = await conn
     .sobject("User")
-    .findOne({ Id: identity.user_id }, "Email, Name");
+    .findOne({ Id: identity.user_id }, ["Id", "Name", "Email"]);
 
-  const userRecord = user as unknown as { Email: string; Name: string };
+  const userRecord = user as unknown as { Id: string; Email: string; Name: string };
 
   return {
     email: userRecord.Email,
@@ -170,28 +171,67 @@ export async function getUserInfo(
   };
 }
 
+/**
+ * Only SELECT fields guaranteed on standard DE orgs:
+ * Id, Name, StageName, Amount, CloseDate, OwnerId, AccountId,
+ * Probability, LastModifiedDate, CreatedDate, Description
+ */
 export async function fetchOpenOpportunities(
   conn: Connection
 ): Promise<SalesforceOpportunity[]> {
   const result = await conn.query<SalesforceOpportunity>(`
-    SELECT Id, Name, Amount, StageName, CloseDate, OwnerId, Owner.Name,
-           LastActivityDate, LastModifiedDate
+    SELECT Id, Name, StageName, Amount, CloseDate, OwnerId, AccountId,
+           Probability, LastModifiedDate, CreatedDate, Description
     FROM Opportunity
     WHERE IsClosed = false
     ORDER BY CloseDate ASC
     LIMIT 500
   `);
-  return result.records;
+
+  const ownerIds = Array.from(
+    new Set(
+      result.records.map((r) => r.OwnerId).filter((id): id is string => Boolean(id))
+    )
+  );
+
+  const ownerNameById = new Map<string, string>();
+  if (ownerIds.length > 0) {
+    // User: Id, Name, Email only
+    const owners = (await conn
+      .sobject("User")
+      .find({ Id: ownerIds }, ["Id", "Name", "Email"])) as Array<{
+      Id: string;
+      Name: string;
+    }>;
+    for (const owner of owners) {
+      ownerNameById.set(owner.Id, owner.Name);
+    }
+  }
+
+  return result.records.map((opp) => ({
+    ...opp,
+    Owner: { Name: ownerNameById.get(opp.OwnerId) || "Unknown" },
+  }));
 }
 
+/**
+ * Task: Id, Subject, ActivityDate, WhatId, Status, OwnerId, CreatedDate, Description
+ * Event: Id, Subject, ActivityDate, WhatId, OwnerId, CreatedDate, StartDateTime, EndDateTime
+ */
 export async function fetchOpportunityActivities(
   conn: Connection,
   opportunityId: string
 ): Promise<SalesforceActivity[]> {
-  // Use sobject().find() so values are escaped via jsforce's SOQL builder
-  // (REST SOQL does not support Apex-style :bind variables).
-  // Event has no standard Type field — use only guaranteed Event columns.
-  const taskFields = ["Id", "Subject", "ActivityDate", "Type", "WhatId"];
+  const taskFields = [
+    "Id",
+    "Subject",
+    "ActivityDate",
+    "WhatId",
+    "Status",
+    "OwnerId",
+    "CreatedDate",
+    "Description",
+  ];
   const eventFields = [
     "Id",
     "Subject",
@@ -199,6 +239,8 @@ export async function fetchOpportunityActivities(
     "WhatId",
     "OwnerId",
     "CreatedDate",
+    "StartDateTime",
+    "EndDateTime",
   ];
 
   const [tasks, events] = await Promise.all([
@@ -220,18 +262,21 @@ export async function fetchOpportunityActivities(
   ];
 }
 
-export async function fetchOpportunityContacts(
+/**
+ * Contact / OpportunityContactRole are not in the safe-field allowlist.
+ * Use Account (Id, Name, Industry, Type) linked via Opportunity.AccountId.
+ */
+export async function fetchOpportunityAccount(
   conn: Connection,
-  opportunityId: string
-): Promise<SalesforceContact[]> {
-  const roles = (await conn
-    .sobject("OpportunityContactRole")
-    .find(
-      { OpportunityId: opportunityId },
-      ["Contact.Id", "Contact.Name", "Contact.Email", "Contact.LastActivityDate"]
-    )) as Array<{ Contact: SalesforceContact }>;
+  accountId: string | null | undefined
+): Promise<SalesforceAccount | null> {
+  if (!accountId) return null;
 
-  return roles.map((r) => r.Contact).filter(Boolean);
+  const account = await conn
+    .sobject("Account")
+    .findOne({ Id: accountId }, ["Id", "Name", "Industry", "Type"]);
+
+  return (account as SalesforceAccount | null) ?? null;
 }
 
 export class SalesforceApiError extends Error {

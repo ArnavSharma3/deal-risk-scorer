@@ -5,23 +5,38 @@ import {
   createConnection,
   fetchOpenOpportunities,
   fetchOpportunityActivities,
-  fetchOpportunityContacts,
+  fetchOpportunityAccount,
   classifySalesforceError,
   refreshAccessToken,
   hasSalesforceCredentials,
 } from "@/lib/salesforce";
 import { scoreAllDeals, trackEvent } from "@/lib/deals";
 import { seedDemoData } from "@/lib/seed";
+import type { SalesforceActivity } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-function mapActivityType(type?: string): "EMAIL" | "MEETING" | "CALL" | "TASK" | "OTHER" {
-  const t = (type || "").toLowerCase();
+function mapActivityType(subject?: string): "EMAIL" | "MEETING" | "CALL" | "TASK" | "OTHER" {
+  const t = (subject || "").toLowerCase();
   if (t.includes("email")) return "EMAIL";
   if (t.includes("meeting") || t.includes("event")) return "MEETING";
   if (t.includes("call")) return "CALL";
   if (t.includes("task")) return "TASK";
   return "OTHER";
+}
+
+function activityDate(a: SalesforceActivity): Date | null {
+  const raw = a.ActivityDate || a.StartDateTime || a.CreatedDate;
+  return raw ? new Date(raw) : null;
+}
+
+function latestActivityDate(activities: SalesforceActivity[]): Date | null {
+  let latest: Date | null = null;
+  for (const a of activities) {
+    const d = activityDate(a);
+    if (d && (!latest || d > latest)) latest = d;
+  }
+  return latest;
 }
 
 async function resolveSalesforceConnection(user: {
@@ -105,6 +120,13 @@ export async function POST() {
 
     let synced = 0;
     for (const opp of opportunities) {
+      const [activities, account] = await Promise.all([
+        fetchOpportunityActivities(conn, opp.Id),
+        fetchOpportunityAccount(conn, opp.AccountId),
+      ]);
+
+      const lastActivity = latestActivityDate(activities);
+
       const deal = await prisma.deal.upsert({
         where: {
           salesforceId_userId: {
@@ -119,9 +141,7 @@ export async function POST() {
           closeDate: new Date(opp.CloseDate),
           ownerName: opp.Owner?.Name || "Unknown",
           ownerId: opp.OwnerId,
-          lastActivityDate: opp.LastActivityDate
-            ? new Date(opp.LastActivityDate)
-            : null,
+          lastActivityDate: lastActivity,
           stageEnteredAt: opp.LastModifiedDate
             ? new Date(opp.LastModifiedDate)
             : null,
@@ -134,9 +154,7 @@ export async function POST() {
           closeDate: new Date(opp.CloseDate),
           ownerName: opp.Owner?.Name || "Unknown",
           ownerId: opp.OwnerId,
-          lastActivityDate: opp.LastActivityDate
-            ? new Date(opp.LastActivityDate)
-            : null,
+          lastActivityDate: lastActivity,
           stageEnteredAt: opp.LastModifiedDate
             ? new Date(opp.LastModifiedDate)
             : null,
@@ -147,35 +165,32 @@ export async function POST() {
       await prisma.activity.deleteMany({ where: { dealId: deal.id } });
       await prisma.stakeholder.deleteMany({ where: { dealId: deal.id } });
 
-      const [activities, contacts] = await Promise.all([
-        fetchOpportunityActivities(conn, opp.Id),
-        fetchOpportunityContacts(conn, opp.Id),
-      ]);
+      const activityRows = activities
+        .map((a) => {
+          const date = activityDate(a);
+          if (!date) return null;
+          return {
+            dealId: deal.id,
+            type: mapActivityType(a.Subject),
+            subject: a.Subject || null,
+            date,
+          };
+        })
+        .filter((row): row is NonNullable<typeof row> => row !== null);
 
-      if (activities.length > 0) {
-        await prisma.activity.createMany({
-          data: activities
-            .filter((a) => a.ActivityDate)
-            .map((a) => ({
-              dealId: deal.id,
-              type: mapActivityType(a.Type || a.Subject),
-              subject: a.Subject || null,
-              date: new Date(a.ActivityDate!),
-            })),
-        });
+      if (activityRows.length > 0) {
+        await prisma.activity.createMany({ data: activityRows });
       }
 
-      if (contacts.length > 0) {
-        await prisma.stakeholder.createMany({
-          data: contacts.map((c) => ({
+      if (account) {
+        await prisma.stakeholder.create({
+          data: {
             dealId: deal.id,
-            name: c.Name,
-            email: c.Email || null,
-            lastEngagementDate: c.LastActivityDate
-              ? new Date(c.LastActivityDate)
-              : null,
-            engagementCount: c.LastActivityDate ? 1 : 0,
-          })),
+            name: account.Name,
+            email: null,
+            lastEngagementDate: lastActivity,
+            engagementCount: activities.length,
+          },
         });
       }
 
