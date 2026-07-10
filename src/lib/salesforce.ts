@@ -175,7 +175,7 @@ export async function fetchOpenOpportunities(
 ): Promise<SalesforceOpportunity[]> {
   const result = await conn.query<SalesforceOpportunity>(`
     SELECT Id, Name, Amount, StageName, CloseDate, OwnerId, Owner.Name,
-           LastActivityDate, LastStageChangeDate
+           LastActivityDate, LastModifiedDate
     FROM Opportunity
     WHERE IsClosed = false
     ORDER BY CloseDate ASC

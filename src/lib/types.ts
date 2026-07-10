@@ -59,7 +59,8 @@ export interface SalesforceOpportunity {
   OwnerId: string;
   Owner: { Name: string };
   LastActivityDate?: string;
-  LastStageChangeDate?: string;
+  /** Proxy for stage change timing when LastStageChangeDate is unavailable. */
+  LastModifiedDate?: string;
 }
 
 export interface SalesforceActivity {

@@ -122,8 +122,8 @@ export async function POST() {
           lastActivityDate: opp.LastActivityDate
             ? new Date(opp.LastActivityDate)
             : null,
-          stageEnteredAt: opp.LastStageChangeDate
-            ? new Date(opp.LastStageChangeDate)
+          stageEnteredAt: opp.LastModifiedDate
+            ? new Date(opp.LastModifiedDate)
             : null,
         },
         create: {
@@ -137,8 +137,8 @@ export async function POST() {
           lastActivityDate: opp.LastActivityDate
             ? new Date(opp.LastActivityDate)
             : null,
-          stageEnteredAt: opp.LastStageChangeDate
-            ? new Date(opp.LastStageChangeDate)
+          stageEnteredAt: opp.LastModifiedDate
+            ? new Date(opp.LastModifiedDate)
             : null,
           userId: user.id,
         },
