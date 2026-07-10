@@ -182,6 +182,9 @@ export async function POST() {
         await prisma.activity.createMany({ data: activityRows });
       }
 
+      // Account is a relationship proxy, not a contact with touch history.
+      // Use engagementCount=1 (presence only) — never total deal activities,
+      // which would inflate avgEngagement in scoreStakeholders().
       if (account) {
         await prisma.stakeholder.create({
           data: {
@@ -189,7 +192,7 @@ export async function POST() {
             name: account.Name,
             email: null,
             lastEngagementDate: lastActivity,
-            engagementCount: activities.length,
+            engagementCount: 1,
           },
         });
       }
