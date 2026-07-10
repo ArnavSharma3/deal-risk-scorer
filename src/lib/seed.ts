@@ -43,7 +43,7 @@ export async function seedDemoData(userId: string) {
     for (const daysAgo of historicalScores) {
       const { calculateRiskScore, hasEnoughData } = await import("@/lib/scoring");
       const input = {
-        lastActivityDate: subDays(seed.lastActivityDate, daysAgo > 0 ? 0 : 0),
+        lastActivityDate: subDays(seed.lastActivityDate, daysAgo > 0 ? daysAgo : 0),
         stageEnteredAt: subDays(seed.stageEnteredAt, daysAgo),
         stage: seed.stage,
         activities: seed.activities.map((a) => ({

@@ -181,35 +181,41 @@ export async function fetchOpportunityActivities(
   conn: Connection,
   opportunityId: string
 ): Promise<SalesforceActivity[]> {
-  const tasks = await conn.query<SalesforceActivity>(`
-    SELECT Id, Subject, ActivityDate, Type, WhatId
-    FROM Task
-    WHERE WhatId = '${opportunityId}'
-    ORDER BY ActivityDate DESC
-    LIMIT 50
-  `);
+  // Use sobject().find() so values are escaped via jsforce's SOQL builder
+  // (REST SOQL does not support Apex-style :bind variables).
+  const fields = ["Id", "Subject", "ActivityDate", "Type", "WhatId"];
 
-  const events = await conn.query<SalesforceActivity>(`
-    SELECT Id, Subject, ActivityDate, Type, WhatId
-    FROM Event
-    WHERE WhatId = '${opportunityId}'
-    ORDER BY ActivityDate DESC
-    LIMIT 50
-  `);
+  const [tasks, events] = await Promise.all([
+    conn
+      .sobject("Task")
+      .find({ WhatId: opportunityId }, fields)
+      .sort("ActivityDate", "DESC")
+      .limit(50),
+    conn
+      .sobject("Event")
+      .find({ WhatId: opportunityId }, fields)
+      .sort("ActivityDate", "DESC")
+      .limit(50),
+  ]);
 
-  return [...tasks.records, ...events.records];
+  return [
+    ...(tasks as SalesforceActivity[]),
+    ...(events as SalesforceActivity[]),
+  ];
 }
 
 export async function fetchOpportunityContacts(
   conn: Connection,
   opportunityId: string
 ): Promise<SalesforceContact[]> {
-  const result = await conn.query<{ Contact: SalesforceContact }>(`
-    SELECT Contact.Id, Contact.Name, Contact.Email, Contact.LastActivityDate
-    FROM OpportunityContactRole
-    WHERE OpportunityId = '${opportunityId}'
-  `);
-  return result.records.map((r) => r.Contact);
+  const roles = (await conn
+    .sobject("OpportunityContactRole")
+    .find(
+      { OpportunityId: opportunityId },
+      ["Contact.Id", "Contact.Name", "Contact.Email", "Contact.LastActivityDate"]
+    )) as Array<{ Contact: SalesforceContact }>;
+
+  return roles.map((r) => r.Contact).filter(Boolean);
 }
 
 export class SalesforceApiError extends Error {
