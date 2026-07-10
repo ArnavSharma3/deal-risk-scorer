@@ -67,8 +67,11 @@ export interface SalesforceActivity {
   Id: string;
   Subject?: string;
   ActivityDate?: string;
+  /** Present on Task; not a standard Event field. */
   Type?: string;
   WhatId?: string;
+  OwnerId?: string;
+  CreatedDate?: string;
 }
 
 export interface SalesforceContact {

@@ -190,17 +190,26 @@ export async function fetchOpportunityActivities(
 ): Promise<SalesforceActivity[]> {
   // Use sobject().find() so values are escaped via jsforce's SOQL builder
   // (REST SOQL does not support Apex-style :bind variables).
-  const fields = ["Id", "Subject", "ActivityDate", "Type", "WhatId"];
+  // Event has no standard Type field — use only guaranteed Event columns.
+  const taskFields = ["Id", "Subject", "ActivityDate", "Type", "WhatId"];
+  const eventFields = [
+    "Id",
+    "Subject",
+    "ActivityDate",
+    "WhatId",
+    "OwnerId",
+    "CreatedDate",
+  ];
 
   const [tasks, events] = await Promise.all([
     conn
       .sobject("Task")
-      .find({ WhatId: opportunityId }, fields)
+      .find({ WhatId: opportunityId }, taskFields)
       .sort("ActivityDate", "DESC")
       .limit(50),
     conn
       .sobject("Event")
-      .find({ WhatId: opportunityId }, fields)
+      .find({ WhatId: opportunityId }, eventFields)
       .sort("ActivityDate", "DESC")
       .limit(50),
   ]);
