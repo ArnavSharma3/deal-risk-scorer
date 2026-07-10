@@ -1,6 +1,7 @@
 export type SortField = "risk" | "value" | "closeDate";
 export type SortDirection = "asc" | "desc";
 export type RiskLevel = "low" | "medium" | "high" | "unknown";
+export type ScoreConfidence = "high" | "medium" | "low";
 
 export interface RiskFactors {
   daysSinceActivity: number;
@@ -14,6 +15,7 @@ export interface RiskFactors {
     stakeholder: number;
     engagementRecency: number;
   };
+  confidence?: ScoreConfidence;
 }
 
 export interface DealWithScore {
@@ -27,6 +29,7 @@ export interface DealWithScore {
   riskScore: number | null;
   riskLevel: RiskLevel;
   status: "SCORED" | "NOT_ENOUGH_DATA";
+  confidence: ScoreConfidence | null;
   explanation: string | null;
   recommendations: string[];
   factors: RiskFactors | null;

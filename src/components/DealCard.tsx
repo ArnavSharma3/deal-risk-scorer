@@ -75,6 +75,7 @@ export default function DealCard({
             <RiskBadge
               score={deal.riskScore}
               level={deal.riskLevel}
+              confidence={deal.confidence}
               showTooltip
             />
             {expanded ? (

@@ -23,6 +23,8 @@ export async function scoreDeal(dealId: string) {
     lastActivityDate: deal.lastActivityDate,
     stageEnteredAt: deal.stageEnteredAt,
     stage: deal.stage,
+    amount: deal.amount,
+    closeDate: deal.closeDate,
     activities: deal.activities.map((a) => ({
       type: a.type,
       date: a.date,
@@ -39,17 +41,18 @@ export async function scoreDeal(dealId: string) {
         dealId,
         status: "NOT_ENOUGH_DATA",
         explanation:
-          "Insufficient CRM data to calculate a reliable risk score. Ensure activity logging and contact roles are up to date in Salesforce.",
+          "This opportunity is missing Stage, Amount, or Close Date — the minimum fields required to calculate a risk score.",
         recommendations: [
-          "Log recent calls, emails, and meetings in Salesforce",
-          "Add contact roles to the opportunity",
-          "Update the opportunity stage and close date",
+          "Set the opportunity StageName in Salesforce",
+          "Enter an Amount on the opportunity",
+          "Set a Close Date on the opportunity",
         ],
+        factors: { confidence: "low" } as object,
       },
     });
   }
 
-  const { score, factors } = calculateRiskScore(input);
+  const { score, factors, confidence } = calculateRiskScore(input);
 
   let explanation: string | null = null;
   let recommendations: string[] = [];
@@ -75,6 +78,12 @@ export async function scoreDeal(dealId: string) {
       "Confirm mutual close plan and next milestones",
       "Update forecast category to reflect current confidence",
     ];
+  }
+
+  if (confidence === "low") {
+    explanation = `${explanation ?? ""} Sparse CRM activity history — score uses conservative defaults for missing signals (${confidence} confidence).`.trim();
+  } else if (confidence === "medium" && !explanation?.includes("confidence")) {
+    explanation = `${explanation ?? ""} (${confidence} confidence based on available CRM data)`.trim();
   }
 
   return prisma.riskScore.create({
@@ -129,6 +138,8 @@ export function formatDealWithScore(
   const status = (latestScore?.status ?? "NOT_ENOUGH_DATA") as
     | "SCORED"
     | "NOT_ENOUGH_DATA";
+  const factors = latestScore?.factors as RiskFactors | null;
+  const confidence = factors?.confidence ?? null;
 
   return {
     id: deal.id,
@@ -141,11 +152,12 @@ export function formatDealWithScore(
     riskScore: score,
     riskLevel: getRiskLevel(score, status),
     status,
+    confidence,
     explanation: latestScore?.explanation ?? null,
     recommendations: Array.isArray(latestScore?.recommendations)
       ? (latestScore.recommendations as string[])
       : [],
-    factors: latestScore?.factors as RiskFactors | null,
+    factors,
     activityCount: deal.activities.length,
     stakeholderCount: deal.stakeholders.length,
   };

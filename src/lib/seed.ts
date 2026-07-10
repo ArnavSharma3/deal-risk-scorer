@@ -46,6 +46,8 @@ export async function seedDemoData(userId: string) {
         lastActivityDate: subDays(seed.lastActivityDate, daysAgo > 0 ? daysAgo : 0),
         stageEnteredAt: subDays(seed.stageEnteredAt, daysAgo),
         stage: seed.stage,
+        amount: seed.amount,
+        closeDate: seed.closeDate,
         activities: seed.activities.map((a) => ({
           type: a.type,
           date: subDays(a.date, daysAgo),

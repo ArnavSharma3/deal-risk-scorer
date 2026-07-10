@@ -1,5 +1,5 @@
 import { differenceInDays } from "date-fns";
-import type { RiskFactors } from "@/lib/types";
+import type { RiskFactors, ScoreConfidence } from "@/lib/types";
 
 const STAGE_NORMS: Record<string, number> = {
   Prospecting: 14,
@@ -25,18 +25,55 @@ const WEIGHTS = {
   engagementRecency: 0.2,
 };
 
-interface ScoringInput {
+/** Conservative defaults when CRM signals are missing (higher = more risk). */
+const MISSING_ACTIVITY_DAYS = 45; // maps to high staleness via scoreActivityDays
+const MISSING_STAGE_DAYS = 21; // assume stuck at stage norm
+
+export interface ScoringInput {
   lastActivityDate: Date | null;
   stageEnteredAt: Date | null;
   stage: string;
+  amount?: number | null;
+  closeDate?: Date | null;
   activities: { type: string; date: Date }[];
   stakeholders: { engagementCount: number; lastEngagementDate: Date | null }[];
 }
 
+/**
+ * Bare minimum for any meaningful score: StageName, Amount, and CloseDate.
+ * Sparse activity/stakeholder history is scored with conservative penalties
+ * instead of returning NOT_ENOUGH_DATA.
+ */
 export function hasEnoughData(input: ScoringInput): boolean {
-  const hasActivity = input.lastActivityDate !== null || input.activities.length > 0;
-  const hasStage = Boolean(input.stage);
-  return hasActivity && hasStage;
+  const hasStage = Boolean(input.stage?.trim());
+  const hasAmount = input.amount != null && !Number.isNaN(input.amount);
+  const hasCloseDate =
+    input.closeDate instanceof Date
+      ? !Number.isNaN(input.closeDate.getTime())
+      : Boolean(input.closeDate);
+
+  return hasStage && hasAmount && hasCloseDate;
+}
+
+export function getScoreConfidence(input: ScoringInput): ScoreConfidence {
+  const hasActivitySignal =
+    input.lastActivityDate !== null || input.activities.length > 0;
+  const hasStakeholderSignal = input.stakeholders.length > 0;
+  const hasStageTiming = input.stageEnteredAt !== null;
+  const hasMeaningfulEngagement = input.activities.some((a) =>
+    ["EMAIL", "MEETING", "CALL"].includes(a.type)
+  );
+
+  const signals = [
+    hasActivitySignal,
+    hasStakeholderSignal,
+    hasStageTiming,
+    hasMeaningfulEngagement,
+  ].filter(Boolean).length;
+
+  if (signals >= 3) return "high";
+  if (signals >= 1) return "medium";
+  return "low";
 }
 
 function scoreActivityDays(daysSince: number): number {
@@ -129,15 +166,19 @@ function scoreEngagementRecency(
 export function calculateRiskScore(input: ScoringInput): {
   score: number;
   factors: RiskFactors;
+  confidence: ScoreConfidence;
 } {
   const now = new Date();
+  const confidence = getScoreConfidence(input);
+
+  // Missing activity → conservative high-staleness penalty (not a skip).
   const daysSinceActivity = input.lastActivityDate
     ? differenceInDays(now, input.lastActivityDate)
-    : 30;
+    : MISSING_ACTIVITY_DAYS;
 
   const daysInStage = input.stageEnteredAt
     ? differenceInDays(now, input.stageEnteredAt)
-    : 14;
+    : MISSING_STAGE_DAYS;
 
   const normDays = STAGE_NORMS[input.stage] ?? 21;
 
@@ -156,6 +197,7 @@ export function calculateRiskScore(input: ScoringInput): {
 
   return {
     score,
+    confidence,
     factors: {
       daysSinceActivity,
       activityScore,
@@ -163,6 +205,7 @@ export function calculateRiskScore(input: ScoringInput): {
       stakeholderScore,
       engagementRecencyScore,
       weights: WEIGHTS,
+      confidence,
     },
   };
 }
@@ -210,5 +253,18 @@ export function getRiskLabel(level: string): string {
       return "High Risk";
     default:
       return "Insufficient Data";
+  }
+}
+
+export function getConfidenceLabel(confidence: ScoreConfidence | null | undefined): string {
+  switch (confidence) {
+    case "high":
+      return "high confidence";
+    case "medium":
+      return "medium confidence";
+    case "low":
+      return "low confidence";
+    default:
+      return "";
   }
 }
